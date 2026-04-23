@@ -17,6 +17,7 @@ class PortfolioAnalyticsService:
         market_symbol_lookup: dict[str, str],
         mutual_fund_name_lookup: dict[str, dict[str, Any]],
         sector_map: dict[str, Any],
+        market_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         stock_holdings = portfolio["holdings"]["stocks"]
         mf_holdings = portfolio["holdings"]["mutual_funds"]
@@ -66,7 +67,7 @@ class PortfolioAnalyticsService:
             "MUTUAL_FUNDS": round((mutual_fund_value / total_current_value) * 100, 2),
         }
 
-        risks = self._detect_risks(portfolio, sector_allocation, stock_exposure, sector_map)
+        risks = self._detect_risks(portfolio, sector_allocation, stock_exposure, sector_map, market_data)
         return {
             "pnl": {
                 "total_change": round(day_change_absolute, 2),
@@ -167,6 +168,7 @@ class PortfolioAnalyticsService:
         sector_allocation: dict[str, float],
         stock_exposure: dict[str, float],
         sector_map: dict[str, Any],
+        market_data: dict[str, Any] | None = None,
     ) -> list[str]:
         risks: list[str] = []
 
@@ -188,6 +190,29 @@ class PortfolioAnalyticsService:
             top_stock, top_weight = next(iter(stock_exposure.items()))
             if top_weight >= 20.0:
                 risks.append(f"Single-stock concentration is elevated in {top_stock} ({top_weight:.2f}%)")
+
+            # Advanced Market-Driven Risks
+            if market_data and "stocks" in market_data:
+                for symbol, weight in stock_exposure.items():
+                    if weight < 1.0: continue # Only check material holdings
+                    
+                    stock_data = market_data["stocks"].get(symbol, {})
+                    if not stock_data: continue
+
+                    # 1. Volatility Risk
+                    if float(stock_data.get("beta", 0.0)) > 1.35:
+                        risks.append(f"Holding {symbol} adds high systemic volatility (Beta: {stock_data['beta']})")
+
+                    # 2. Valuation Risk
+                    if float(stock_data.get("pe_ratio", 0.0)) > 70.0:
+                        risks.append(f"Elevated valuation risk in {symbol} (P/E: {stock_data['pe_ratio']})")
+
+                    # 3. Liquidity/Momentum Divergence
+                    vol = float(stock_data.get("volume", 0))
+                    avg_vol = float(stock_data.get("avg_volume_20d", 0))
+                    change = float(stock_data.get("change_percent", 0))
+                    if change < -2.5 and vol > avg_vol * 1.5:
+                        risks.append(f"High-volume sell-off detected in {symbol} ({change:+.2f}%)")
 
         existing_warning = portfolio.get("analytics", {}).get("risk_metrics", {}).get("concentration_warning")
         if existing_warning:

@@ -67,6 +67,7 @@ class FinancialAdvisorService:
             market_symbol_lookup=state["market_symbol_lookup"],
             mutual_fund_name_lookup=state["mutual_fund_name_lookup"],
             sector_map=state["sector_map"],
+            market_data=state["market"],
         )
         self.observability_service.record_phase(
             trace,
