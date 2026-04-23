@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  financial-agent:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./AgentAssignment:/app/AgentAssignment

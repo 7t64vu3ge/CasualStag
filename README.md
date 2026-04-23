@@ -147,6 +147,32 @@ PYTHONPATH=. .venv/bin/pytest tests/test_enhancements.py
 
 ---
 
+## 🚀 Hosting & Deployment
+
+### 🐳 1. Docker (Recommended for Production)
+The project includes a `Dockerfile` and `docker-compose.yml` for quick containerized deployment.
+
+```bash
+# Build and run the container
+docker-compose up --build
+```
+The API will be available at `http://localhost:8000`.
+
+### ☁️ 2. Cloud Hosting (Render / Railway / Heroku)
+Since this is a standard FastAPI app, you can host it easily on any PaaS:
+
+1. **Connect GitHub**: Push your code to a GitHub repository.
+2. **Configure Build Command**: `pip install -r requirements.txt`
+3. **Configure Start Command**: `python -m financial_agent`
+4. **Environment Variables**: Add the variables from `.env.example` to the provider's dashboard.
+
+### 🛡️ 3. Production Considerations
+- **Reverse Proxy**: Use Nginx or Caddy if deploying directly to a VM.
+- **Security**: Ensure `GROQ_API_KEY` is kept secret in your environment settings.
+- **Port**: Most cloud providers inject a `PORT` environment variable. The app is configured to listen on `FINANCIAL_AGENT_PORT` or default to 8000.
+
+---
+
 ## 📡 API Reference
 
 ### `POST /analyze`
