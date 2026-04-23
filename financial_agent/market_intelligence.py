@@ -30,14 +30,45 @@ class MarketIntelligenceService:
     ) -> str:
         nifty_change = market_data["indices"]["NIFTY50"]["change_percent"]
         sensex_change = market_data["indices"]["SENSEX"]["change_percent"]
-        breadth = historical_data.get("market_breadth", {}).get("nifty50", {}).get("advance_decline_ratio", 1.0)
-        fear_signal = historical_data.get("market_breadth", {}).get("sentiment_indicator", "")
+        breadth_data = historical_data.get("market_breadth", {})
+        fear_signal = breadth_data.get("sentiment_indicator", "")
 
+        # Initial score based on price action
         score = (nifty_change + sensex_change) / 2
-        if breadth < 0.7:
+
+        # 1. Broad Market Breadth (Nifty 500)
+        nifty500_breadth = breadth_data.get("nifty500", {}).get("advance_decline_ratio", 1.0)
+        if nifty500_breadth < 0.5:
+            score -= 0.1
+        elif nifty500_breadth > 1.5:
+            score += 0.1
+
+        # 2. Institutional Flows (FII/DII)
+        fii_net = historical_data.get("fii_dii_data", {}).get("fii", {}).get("net_value_cr", 0)
+        if fii_net < -3000:
+            score -= 0.2
+        elif fii_net > 3000:
+            score += 0.2
+
+        # 3. New Highs/Lows (Momentum)
+        highs = breadth_data.get("new_52_week_highs", 0)
+        lows = breadth_data.get("new_52_week_lows", 0)
+        if lows > highs * 3:
             score -= 0.15
+        elif highs > lows * 3:
+            score += 0.15
+
+        # 4. Persistence (Trend Duration)
+        nifty_trend = historical_data.get("index_history", {}).get("NIFTY50", {})
+        if nifty_trend.get("trend") == "DOWNTREND" and nifty_trend.get("trend_duration_days", 0) >= 5:
+            score -= 0.1
+        elif nifty_trend.get("trend") == "UPTREND" and nifty_trend.get("trend_duration_days", 0) >= 5:
+            score += 0.1
+
         if fear_signal == "FEAR":
             score -= 0.15
+        elif fear_signal == "GREED":
+            score += 0.15
 
         if score <= -0.5:
             return "Bearish"
