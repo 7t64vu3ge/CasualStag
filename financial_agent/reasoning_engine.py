@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Callable, TypedDict
 
 from financial_agent.explanation import ExplanationService, label_for_target
 from financial_agent.observability import ObservabilityService, TraceRun
-from financial_agent.utils import clamp, prettify_token, short_headline
+from financial_agent.portfolio_analytics import NON_EQUITY_BUCKETS
+from financial_agent.utils import clamp, normalize_identifier, prettify_token, short_headline
 
 try:
     from langgraph.graph import END, StateGraph
@@ -25,6 +27,10 @@ class ReasoningState(TypedDict, total=False):
     conflicts: list[dict[str, Any]]
     explanation: dict[str, Any]
     evaluation: dict[str, Any]
+    insight: str
+    counterfactuals: list[dict[str, Any]]
+    non_drivers: list[str]
+    causal_graph: list[dict[str, Any]]
 
 
 class EvaluationService:
@@ -56,7 +62,7 @@ class EvaluationService:
         return {
             "score": score,
             "breakdown": {
-                "causality_clarity": round(clamp(causality, 1.0, 5.0), 2),
+                "causality": round(clamp(causality, 1.0, 5.0), 2),
                 "relevance": round(clamp(relevance, 1.0, 5.0), 2),
                 "specificity": round(clamp(specificity, 1.0, 5.0), 2),
             },
@@ -121,9 +127,9 @@ class ReasoningEngine:
         state["relevant_signals"] = relevant_signals
         self.observability_service.record_phase(
             state["trace"],
-            "reasoning.filter_signals",
+            "filtered_news",
             input_data={"total_news": len(state["market_intelligence"]["processed_news"])},
-            output_data={"relevant_news": len(relevant_signals)},
+            output_data={"relevant_signals": relevant_signals},
         )
         return state
 
@@ -148,9 +154,9 @@ class ReasoningEngine:
         state["conflicts"] = conflicts
         self.observability_service.record_phase(
             state["trace"],
-            "reasoning.link_signals",
+            "linked_signals",
             input_data={"relevant_news": len(state["relevant_signals"])},
-            output_data={"linked_signals": len(linked), "conflicts": len(conflicts)},
+            output_data={"linked_signals": linked, "conflicts": conflicts},
         )
         return state
 
@@ -182,21 +188,46 @@ class ReasoningEngine:
                 if len(top_signals) == 3:
                     break
         state["top_signals"] = top_signals
+        
+        causal_graph = []
+        for signal in top_signals:
+            causal_graph.append({
+                "event": self._cause_label(signal),
+                "sector": signal.get("dominant_sector_label"),
+                "stock": signal.get("dominant_stock_label"),
+                "portfolio_impact": round(signal["impact"], 2)
+            })
+        state["causal_graph"] = causal_graph
+
         self.observability_service.record_phase(
             state["trace"],
-            "reasoning.rank_impacts",
+            "drivers",
             output_data={
-                "top_factors": [signal["factor"] for signal in top_signals],
-                "top_impacts": [signal["impact"] for signal in top_signals],
+                "top_signals": top_signals,
+                "causal_graph": causal_graph,
             },
         )
         return state
 
     def explanation_node(self, state: ReasoningState) -> ReasoningState:
+        insight = self._build_dominance_insight(
+            pnl=state["portfolio_analytics"]["pnl"],
+            top_signals=state["top_signals"],
+        )
+        counterfactuals = self._build_counterfactual(
+            pnl=state["portfolio_analytics"]["pnl"],
+            top_signals=state["top_signals"],
+        )
+        non_drivers = self._build_non_drivers(
+            allocation=state["portfolio_analytics"]["allocation"],
+            sector_trends=state["market_intelligence"]["sector_trends"],
+            top_signals=state["top_signals"],
+        )
         drivers = [
             {
                 "factor": signal["factor"],
                 "impact": round(signal["impact"], 2),
+                "impact_details": signal.get("impact_details"),
                 "causal_chain": signal["causal_chain"],
                 "headline": signal["headline"],
             }
@@ -210,12 +241,18 @@ class ReasoningEngine:
             "drivers": drivers,
             "risks": state["portfolio_analytics"]["risks"],
             "conflicts": state["conflicts"],
+            "insight": insight,
+            "counterfactuals": counterfactuals,
+            "non_drivers": non_drivers,
         }
         explanation = self.explanation_service.generate_summary(explanation_context)
         state["explanation"] = explanation
+        state["insight"] = insight
+        state["counterfactuals"] = counterfactuals
+        state["non_drivers"] = non_drivers
         self.observability_service.record_phase(
             state["trace"],
-            "reasoning.explanation",
+            "final_summary",
             input_data={"prompt": explanation["prompt"]},
             output_data={"summary": explanation["summary"], "generator": explanation["generator"]},
             metadata={"model": explanation["model"]},
@@ -229,13 +266,13 @@ class ReasoningEngine:
             pnl=state["portfolio_analytics"]["pnl"],
             conflicts=state["conflicts"],
         )
-        confidence = self._confidence_score(
+        confidence_assessment = self._confidence_assessment(
             pnl=state["portfolio_analytics"]["pnl"],
             linked_signals=state["linked_signals"],
             top_signals=state["top_signals"],
             conflicts=state["conflicts"],
         )
-        evaluation["confidence"] = confidence
+        evaluation.update(confidence_assessment)
         state["evaluation"] = evaluation
         self.observability_service.record_phase(
             state["trace"],
@@ -257,16 +294,22 @@ class ReasoningEngine:
             if not matched_stocks:
                 return None
             impact = 0.0
+            stock_impacts: list[tuple[str, float, float]] = []
             sectors: list[str] = []
             for stock in matched_stocks:
                 stock_change = float(market_stocks[stock]["change_percent"])
-                impact += stock_change * stock_exposure[stock] / 100
+                stock_impact = stock_change * stock_exposure[stock] / 100
+                impact += stock_impact
+                stock_impacts.append((stock, stock_change, stock_impact))
                 sector = market_stocks[stock]["sector"]
                 if sector not in sectors:
                     sectors.append(sector)
-            factor = f"{label_for_target(signal['target'])} price action after {short_headline(signal['headline'])}"
+            dominant_stock, dominant_change, _ = max(stock_impacts, key=lambda item: abs(item[2]))
+            dominant_sector = market_stocks[dominant_stock]["sector"]
+            target_label = self._security_label(dominant_stock, market_stocks)
+            factor = self._format_factor_label(signal, target_label=target_label, impact=impact)
             causal_chain = (
-                f"{short_headline(signal['headline'])} -> {label_for_target(signal['target'])} "
+                f"{short_headline(signal['headline'])} -> {target_label} "
                 f"{self._direction_label(impact)} -> portfolio stock exposure"
             )
             return {
@@ -276,7 +319,19 @@ class ReasoningEngine:
                 "impact": round(impact, 2),
                 "factor": factor,
                 "causal_chain": causal_chain,
+                "driver_target": target_label,
+                "impact_details": {
+                    "impact_pct": round(impact, 2),
+                    "sector_weight": round(allocation.get(dominant_sector, 0.0), 2) if dominant_sector in allocation else None,
+                    "sector_change": round(float(sector_trends.get(dominant_sector, 0.0)), 2)
+                    if dominant_sector in sector_trends
+                    else None,
+                    "stock_weight": round(stock_exposure[dominant_stock], 2),
+                    "stock_change": round(float(dominant_change), 2),
+                },
                 "primary_key": f"stock:{matched_stocks[0]}",
+                "dominant_stock_label": target_label,
+                "dominant_sector_label": prettify_token(dominant_sector),
             }
 
         matched_sectors = [sector for sector in signal["sectors"] if sector in allocation]
@@ -289,12 +344,15 @@ class ReasoningEngine:
         if not matched_sectors:
             return None
 
+        sector_contributions = {
+            sector: sector_trends.get(sector, 0.0) * allocation[sector] / 100 for sector in matched_sectors
+        }
         impact = round(sum(sector_trends.get(sector, 0.0) * allocation[sector] / 100 for sector in matched_sectors), 2)
-        dominant_sector = max(matched_sectors, key=lambda sector: abs(sector_trends.get(sector, 0.0) * allocation[sector] / 100))
-        factor = f"{prettify_token(dominant_sector)} move after {short_headline(signal['headline'])}"
+        dominant_sector = max(sector_contributions, key=lambda sector: abs(sector_contributions[sector]))
+        target_label = prettify_token(dominant_sector)
+        factor = self._format_factor_label(signal, target_label=target_label, impact=impact)
         causal_chain = (
-            f"{short_headline(signal['headline'])} -> {prettify_token(dominant_sector)} sector move "
-            f"-> portfolio exposure in {prettify_token(dominant_sector)}"
+            f"{short_headline(signal['headline'])} -> {target_label} sector move -> portfolio exposure in {target_label}"
         )
         return {
             **signal,
@@ -303,7 +361,17 @@ class ReasoningEngine:
             "impact": impact,
             "factor": factor,
             "causal_chain": causal_chain,
+            "driver_target": target_label,
+            "impact_details": {
+                "impact_pct": impact,
+                "sector_weight": round(allocation[dominant_sector], 2),
+                "sector_change": round(float(sector_trends.get(dominant_sector, 0.0)), 2),
+                "stock_weight": None,
+                "stock_change": None,
+            },
             "primary_key": f"sector:{dominant_sector}",
+            "dominant_sector_label": target_label,
+            "dominant_stock_label": None,
         }
 
     def _detect_conflict(self, signal: dict[str, Any], linked_signal: dict[str, Any]) -> dict[str, Any] | None:
@@ -328,21 +396,20 @@ class ReasoningEngine:
             }
         return None
 
-    def _confidence_score(
+    def _confidence_assessment(
         self,
         *,
         pnl: dict[str, Any],
         linked_signals: list[dict[str, Any]],
         top_signals: list[dict[str, Any]],
         conflicts: list[dict[str, Any]],
-    ) -> float:
+    ) -> dict[str, Any]:
         completeness = 1.0 if linked_signals else 0.6
-        total_linked_impact = sum(abs(signal["impact"]) for signal in linked_signals)
         total_top_impact = sum(abs(signal["impact"]) for signal in top_signals)
         pnl_magnitude = abs(pnl["percentage_change"])
         coverage = 1.0 if pnl_magnitude < 0.1 else min(total_top_impact / max(pnl_magnitude, 0.01), 1.0)
         alignment = 0.8
-        if total_linked_impact > 0:
+        if total_top_impact > 0:
             pnl_direction = 1 if pnl["percentage_change"] > 0 else -1 if pnl["percentage_change"] < 0 else 0
             aligned = sum(
                 abs(signal["impact"])
@@ -350,9 +417,228 @@ class ReasoningEngine:
                 if pnl_direction == 0 or (signal["impact"] > 0 and pnl_direction > 0) or (signal["impact"] < 0 and pnl_direction < 0)
             )
             alignment = aligned / total_top_impact if total_top_impact else 0.7
+        news_strength = 0.5
+        if top_signals:
+            average_priority = sum(signal["priority_rank"] for signal in top_signals) / (3 * len(top_signals))
+            average_sentiment = sum(min(abs(float(signal["sentiment_score"])), 1.0) for signal in top_signals) / len(top_signals)
+            news_strength = clamp((0.6 * average_priority) + (0.4 * average_sentiment), 0.0, 1.0)
         conflict_penalty = min(len(conflicts) * 0.08, 0.24)
-        confidence = clamp((0.35 * completeness) + (0.4 * coverage) + (0.25 * alignment) - conflict_penalty, 0.0, 1.0)
-        return round(confidence, 2)
+        confidence = clamp(
+            (0.25 * completeness) + (0.3 * coverage) + (0.2 * alignment) + (0.25 * news_strength) - conflict_penalty,
+            0.0,
+            1.0,
+        )
+        return {
+            "confidence": round(confidence, 2),
+            "confidence_factors": {
+                "data_completeness": round(completeness, 2),
+                "impact_coverage": round(coverage, 2),
+                "signal_alignment": round(alignment, 2),
+                "news_strength": round(news_strength, 2),
+                "conflict_penalty": round(conflict_penalty, 2),
+            },
+        }
+
+    def _build_dominance_insight(self, *, pnl: dict[str, Any], top_signals: list[dict[str, Any]]) -> str:
+        if not top_signals:
+            return "No material driver could be isolated from the available signals."
+
+        primary_driver = top_signals[0]
+        target_label = primary_driver.get("driver_target", primary_driver["factor"])
+        pnl_magnitude = abs(pnl["percentage_change"])
+        if pnl_magnitude < 0.01:
+            return f"{target_label} was the largest identified driver, but the portfolio finished close to flat."
+
+        share_of_move = min(abs(primary_driver["impact"]) / max(pnl_magnitude, 0.01), 1.0)
+        if share_of_move >= 0.5:
+            return f"{target_label} accounted for about {share_of_move * 100:.0f}% of the observed portfolio move."
+        return f"No single factor dominated; {target_label} was the largest driver at about {share_of_move * 100:.0f}% of the move."
+
+    def _build_counterfactual(
+        self,
+        *,
+        pnl: dict[str, Any],
+        top_signals: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        counterfactuals: list[dict[str, Any]] = []
+        for driver in top_signals[:2]:
+            target_label = driver.get("driver_target", driver["factor"])
+            change_without_factor = round(pnl["percentage_change"] - driver["impact"], 2)
+            counterfactuals.append({
+                "without": target_label,
+                "portfolio_change_without_factor": change_without_factor,
+                "impact_removed": round(abs(driver["impact"]), 2),
+                "insight": (
+                    f"Without {target_label}, the portfolio would have been {self._pnl_phrase(change_without_factor)} "
+                    f"instead of {self._pnl_phrase(pnl['percentage_change'])}."
+                ),
+            })
+        return counterfactuals
+
+    def _build_non_drivers(
+        self,
+        *,
+        allocation: dict[str, float],
+        sector_trends: dict[str, float],
+        top_signals: list[dict[str, Any]],
+    ) -> list[str]:
+        driver_sectors = {sector for signal in top_signals for sector in signal.get("matched_sectors", [])}
+        low_exposure_candidates: list[tuple[float, str]] = []
+        muted_move_candidates: list[tuple[float, str]] = []
+
+        for sector, weight in allocation.items():
+            if sector in NON_EQUITY_BUCKETS or sector in driver_sectors:
+                continue
+
+            sector_change = float(sector_trends.get(sector, 0.0))
+            contribution = round(sector_change * weight / 100, 2)
+            label = prettify_token(sector)
+            if weight < 10.0 and abs(contribution) < 0.15:
+                low_exposure_candidates.append(
+                    (
+                        weight,
+                        f"{label} had negligible impact due to low exposure ({weight:.2f}%).",
+                    )
+                )
+                continue
+
+            if abs(sector_change) < 0.75 and abs(contribution) < 0.15:
+                contribution_text = "<0.10 pp" if abs(contribution) < 0.1 else f"{abs(contribution):.2f} pp"
+                muted_move_candidates.append(
+                    (
+                        abs(sector_change),
+                        f"{label} was not a driver because its move was muted ({sector_change:+.2f}%), contributing only {contribution_text}.",
+                    )
+                )
+
+        non_drivers: list[str] = []
+        if low_exposure_candidates:
+            low_exposure_candidates.sort(key=lambda item: item[0], reverse=True)
+            non_drivers.append(low_exposure_candidates[0][1])
+        if muted_move_candidates:
+            muted_move_candidates.sort(key=lambda item: item[0])
+            non_drivers.append(muted_move_candidates[0][1])
+
+        if non_drivers:
+            return non_drivers[:2]
+
+        if top_signals:
+            primary_target = top_signals[0].get("driver_target", "the primary driver")
+            return [f"No other allocated sector came close to {primary_target} in portfolio impact."]
+        return []
+
+    def _format_factor_label(self, signal: dict[str, Any], *, target_label: str, impact: float) -> str:
+        cause_label = self._cause_label(signal)
+        movement_label = "Decline" if impact < -0.05 else "Strength" if impact > 0.05 else "Stability"
+        return f"{cause_label} -> {target_label} {movement_label}"
+
+    def _cause_label(self, signal: dict[str, Any]) -> str:
+        for causal_factor in signal.get("causal_factors", []):
+            phrase = self._compress_causal_phrase(causal_factor)
+            if phrase:
+                return phrase
+
+        normalized_targets = {
+            normalize_identifier(signal.get("target", "")).replace("_", ""),
+            *[normalize_identifier(sector).replace("_", "") for sector in signal.get("sectors", [])],
+        }
+        for keyword in signal.get("keywords", []):
+            phrase = self._format_event_phrase(keyword)
+            if phrase and normalize_identifier(phrase).replace("_", "") not in normalized_targets:
+                return phrase
+
+        headline_clause = re.split(r",| but | amid | as ", signal["headline"], maxsplit=1, flags=re.IGNORECASE)[0]
+        return short_headline(headline_clause, limit=36)
+
+    def _compress_causal_phrase(self, value: str) -> str:
+        cleaned = re.sub(r"[()]", "", value).strip(" .,:;-")
+        if not cleaned:
+            return ""
+
+        stop_verbs = {
+            "add",
+            "adds",
+            "attract",
+            "attracting",
+            "benefit",
+            "benefits",
+            "compress",
+            "compresses",
+            "create",
+            "creating",
+            "drive",
+            "drives",
+            "improve",
+            "improves",
+            "increase",
+            "increases",
+            "limit",
+            "limiting",
+            "make",
+            "making",
+            "offer",
+            "offers",
+            "pressure",
+            "pressuring",
+            "reduce",
+            "reducing",
+            "reflect",
+            "reflected",
+            "show",
+            "showing",
+            "signal",
+            "signals",
+            "support",
+            "supports",
+            "validate",
+            "validates",
+            "weigh",
+            "weighing",
+        }
+
+        selected: list[str] = []
+        for raw_word in cleaned.split():
+            word = raw_word.strip(" ,.;:()")
+            if not word:
+                continue
+            normalized = word.lower().strip("-")
+            if selected and normalized in stop_verbs:
+                break
+            selected.append(word)
+            if len(selected) == 4:
+                break
+
+        phrase = " ".join(selected) if selected else " ".join(cleaned.split()[:4])
+        return self._format_event_phrase(phrase)
+
+    def _format_event_phrase(self, value: str) -> str:
+        formatted_tokens: list[str] = []
+        for raw_token in value.split():
+            token = raw_token.strip(" ,.;:()")
+            if not token:
+                continue
+            if "-" in token and token.upper() != token:
+                parts = [part if part.isupper() else part.capitalize() for part in token.split("-")]
+                formatted_tokens.append("-".join(parts))
+                continue
+            if token.upper() == token or any(char.isdigit() for char in token) or "/" in token:
+                formatted_tokens.append(token)
+                continue
+            formatted_tokens.append(token.capitalize())
+        return " ".join(formatted_tokens)
+
+    def _security_label(self, symbol: str, market_stocks: dict[str, Any]) -> str:
+        name = market_stocks.get(symbol, {}).get("name") or label_for_target(symbol)
+        for suffix in (" Ltd", " Limited"):
+            if name.endswith(suffix):
+                return name[: -len(suffix)]
+        return name
+
+    def _pnl_phrase(self, percentage_change: float) -> str:
+        if abs(percentage_change) < 0.01:
+            return "roughly flat"
+        direction = "down" if percentage_change < 0 else "up"
+        return f"{direction} {abs(percentage_change):.2f}%"
 
     def _direction_label(self, impact: float) -> str:
         if impact > 0:

@@ -9,7 +9,7 @@ from financial_agent.market_intelligence import MarketIntelligenceService
 from financial_agent.observability import ObservabilityService
 from financial_agent.portfolio_analytics import PortfolioAnalyticsService
 from financial_agent.reasoning_engine import EvaluationService, ReasoningEngine
-from financial_agent.schemas import AnalyzeResponse, Conflict, Driver, PortfolioDescriptor
+from financial_agent.schemas import AnalyzeResponse, ConfidenceFactors, Conflict, Counterfactual, Driver, ImpactAttribution, PortfolioDescriptor
 
 
 class FinancialAdvisorService:
@@ -19,7 +19,7 @@ class FinancialAdvisorService:
         self.market_intelligence_service = MarketIntelligenceService()
         self.portfolio_analytics_service = PortfolioAnalyticsService()
         self.observability_service = ObservabilityService(settings)
-        self.explanation_service = ExplanationService(settings.explanation_mode)
+        self.explanation_service = ExplanationService(settings)
         self.reasoning_engine = ReasoningEngine(
             explanation_service=self.explanation_service,
             evaluation_service=EvaluationService(),
@@ -90,8 +90,13 @@ class FinancialAdvisorService:
 
         response = AnalyzeResponse(
             summary=reasoning_state["explanation"]["summary"],
+            insight=reasoning_state.get("insight"),
             drivers=[
-                Driver(factor=signal["factor"], impact=round(signal["impact"], 2))
+                Driver(
+                    factor=signal["factor"],
+                    impact=round(signal["impact"], 2),
+                    impact_details=ImpactAttribution(**signal["impact_details"]) if signal.get("impact_details") else None,
+                )
                 for signal in reasoning_state["top_signals"]
             ],
             risks=portfolio_analytics["risks"],
@@ -99,9 +104,13 @@ class FinancialAdvisorService:
                 Conflict(signal=conflict["signal"], explanation=conflict["explanation"])
                 for conflict in reasoning_state["conflicts"]
             ],
+            non_drivers=reasoning_state.get("non_drivers", []),
+            counterfactuals=[Counterfactual(**c) for c in reasoning_state.get("counterfactuals", [])],
             confidence=reasoning_state["evaluation"]["confidence"],
+            confidence_factors=ConfidenceFactors(**reasoning_state["evaluation"]["confidence_factors"]),
             score=reasoning_state["evaluation"]["score"],
+            evaluation_breakdown=reasoning_state["evaluation"]["breakdown"],
+            causal_graph=reasoning_state["causal_graph"],
         )
         self.observability_service.finish_trace(trace, response.model_dump())
         return response
-

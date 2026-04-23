@@ -5,7 +5,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from langfuse import Langfuse
+try:
+    from langfuse import Langfuse
+except ImportError:  # pragma: no cover - optional dependency
+    Langfuse = None  # type: ignore[assignment]
 
 from financial_agent.config import Settings
 
@@ -23,8 +26,8 @@ class TraceRun:
 
 class ObservabilityService:
     def __init__(self, settings: Settings) -> None:
-        self._client: Langfuse | None = None
-        if settings.langfuse_public_key and settings.langfuse_secret_key:
+        self._client: Any | None = None
+        if Langfuse and settings.langfuse_public_key and settings.langfuse_secret_key:
             self._client = Langfuse(
                 public_key=settings.langfuse_public_key,
                 secret_key=settings.langfuse_secret_key,
@@ -83,4 +86,3 @@ class ObservabilityService:
                 metadata={"latency_ms": total_elapsed_ms, "event_count": len(trace.events)},
             )
             self._client.flush()
-

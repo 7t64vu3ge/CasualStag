@@ -5,7 +5,11 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - optional dependency
+    def load_dotenv(*args, **kwargs) -> bool:
+        return False
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -21,6 +25,8 @@ class Settings:
     langfuse_public_key: str | None
     langfuse_secret_key: str | None
     langfuse_host: str | None
+    groq_api_key: str | None
+    groq_model: str | None
 
 
 @lru_cache(maxsize=1)
@@ -33,5 +39,6 @@ def get_settings() -> Settings:
         langfuse_public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
         langfuse_secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
         langfuse_host=os.getenv("LANGFUSE_HOST"),
+        groq_api_key=os.getenv("GROQ_API_KEY"),
+        groq_model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
     )
-

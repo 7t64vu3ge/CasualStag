@@ -28,7 +28,11 @@ def test_analyze_sector_heavy_portfolio() -> None:
     payload = response.json()
     assert payload["score"] >= 1.0
     assert 0.0 <= payload["confidence"] <= 1.0
+    assert payload["confidence_factors"]["data_completeness"] >= 0.0
     assert payload["drivers"]
+    assert payload["drivers"][0]["impact_details"]["impact_pct"] == payload["drivers"][0]["impact"]
     assert payload["risks"]
+    assert payload["non_drivers"]
+    assert payload["counterfactuals"][0]["impact_removed"] >= 0.0
+    assert 1 <= len(payload["summary"].splitlines()) <= 4
     assert "portfolio" in payload["summary"].lower() or "priya" in payload["summary"].lower()
-
