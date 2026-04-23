@@ -1,0 +1,107 @@
+from __future__ import annotations
+
+from typing import Any
+
+from financial_agent.config import Settings
+from financial_agent.data_loader import DataLoader
+from financial_agent.explanation import ExplanationService
+from financial_agent.market_intelligence import MarketIntelligenceService
+from financial_agent.observability import ObservabilityService
+from financial_agent.portfolio_analytics import PortfolioAnalyticsService
+from financial_agent.reasoning_engine import EvaluationService, ReasoningEngine
+from financial_agent.schemas import AnalyzeResponse, Conflict, Driver, PortfolioDescriptor
+
+
+class FinancialAdvisorService:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.loader = DataLoader(settings.data_dir)
+        self.market_intelligence_service = MarketIntelligenceService()
+        self.portfolio_analytics_service = PortfolioAnalyticsService()
+        self.observability_service = ObservabilityService(settings)
+        self.explanation_service = ExplanationService(settings.explanation_mode)
+        self.reasoning_engine = ReasoningEngine(
+            explanation_service=self.explanation_service,
+            evaluation_service=EvaluationService(),
+            observability_service=self.observability_service,
+        )
+
+    def list_portfolios(self) -> list[PortfolioDescriptor]:
+        return [PortfolioDescriptor.model_validate(item) for item in self.loader.list_portfolios()]
+
+    def analyze(self, requested_portfolio_id: str) -> AnalyzeResponse:
+        trace = self.observability_service.start_trace(
+            name="analyze",
+            request_input={"portfolio_id": requested_portfolio_id},
+        )
+        state = self.loader.get_portfolio_state(requested_portfolio_id)
+        self.observability_service.record_phase(
+            trace,
+            "data.load",
+            output_data={
+                "portfolio_id": state["portfolio_id"],
+                "portfolio_name": state["portfolio"]["user_name"],
+                "datasets": ["market_data", "news_data", "portfolios", "sector_mapping", "mutual_funds", "historical_data"],
+            },
+        )
+
+        market_intelligence = self.market_intelligence_service.analyze(
+            market_data=state["market"],
+            news_data=state["news"],
+            sector_mapping=state["sector_map"],
+            historical_data=state["historical"],
+        )
+        self.observability_service.record_phase(
+            trace,
+            "phase.market_intelligence",
+            output_data={
+                "market_sentiment": market_intelligence["market_sentiment"],
+                "processed_news": len(market_intelligence["processed_news"]),
+                "sector_trend_count": len(market_intelligence["sector_trends"]),
+            },
+        )
+
+        portfolio_analytics = self.portfolio_analytics_service.analyze(
+            portfolio=state["portfolio"],
+            mutual_funds_data=state["mutual_funds"],
+            market_symbol_lookup=state["market_symbol_lookup"],
+            mutual_fund_name_lookup=state["mutual_fund_name_lookup"],
+            sector_map=state["sector_map"],
+        )
+        self.observability_service.record_phase(
+            trace,
+            "phase.portfolio_analytics",
+            output_data={
+                "pnl": portfolio_analytics["pnl"],
+                "risk_count": len(portfolio_analytics["risks"]),
+                "top_sector": next(iter(portfolio_analytics["allocation"].items()), None),
+            },
+        )
+
+        reasoning_state = self.reasoning_engine.run(
+            {
+                "market_intelligence": market_intelligence,
+                "portfolio_analytics": portfolio_analytics,
+                "portfolio": state["portfolio"],
+                "market": state["market"],
+                "trace": trace,
+            }
+        )
+
+        response = AnalyzeResponse(
+            summary=reasoning_state["explanation"]["summary"],
+            drivers=[
+                Driver(factor=signal["factor"], impact=round(signal["impact"], 2))
+                for signal in reasoning_state["top_signals"]
+            ],
+            risks=portfolio_analytics["risks"],
+            conflicts=[
+                Conflict(signal=conflict["signal"], explanation=conflict["explanation"])
+                for conflict in reasoning_state["conflicts"]
+            ],
+            confidence=reasoning_state["evaluation"]["confidence"],
+            score=reasoning_state["evaluation"]["score"],
+        )
+        self.observability_service.finish_trace(trace, response.model_dump())
+        return response
+
