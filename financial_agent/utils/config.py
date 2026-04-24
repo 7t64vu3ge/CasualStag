@@ -33,8 +33,8 @@ class Settings:
 def get_settings() -> Settings:
     return Settings(
         data_dir=Path(os.getenv("FINANCIAL_AGENT_DATA_DIR", ROOT_DIR / "AgentAssignment")),
-        api_host=os.getenv("FINANCIAL_AGENT_HOST", "127.0.0.1"),
-        api_port=int(os.getenv("FINANCIAL_AGENT_PORT", "8000")),
+        api_host=os.getenv("FINANCIAL_AGENT_HOST", "0.0.0.0"),
+        api_port=int(os.getenv("PORT", os.getenv("FINANCIAL_AGENT_PORT", "8000"))),
         explanation_mode=os.getenv("FINANCIAL_AGENT_EXPLANATION_MODE", "template"),
         langfuse_public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
         langfuse_secret_key=os.getenv("LANGFUSE_SECRET_KEY"),

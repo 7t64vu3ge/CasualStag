@@ -42,7 +42,26 @@ I have configured a unified **Multi-Stage Dockerfile** to work seamlessly with R
 
 ---
 
-## 3. Environment Variables (Critical)
+## 3. Native Python Deployment (Without Docker)
+If you prefer not to use Docker, you can deploy using a standard Python environment.
+
+### Backend Setup
+1. **Create a Web Service** on Render.
+2. **Environment**: `Python 3`
+3. **Build Command**: `pip install -r requirements.txt`
+4. **Start Command**: `sh scripts/start_backend.sh`
+5. **Environment Variables**: Add all keys from `.env`.
+
+### Frontend Setup
+1. **Create another Web Service** on Render.
+2. **Environment**: `Python 3`
+3. **Build Command**: `pip install -r requirements.txt`
+4. **Start Command**: `sh scripts/start_frontend.sh`
+5. **Environment Variables**: Add `FINANCIAL_AGENT_API_URL` pointing to your Backend.
+
+---
+
+## 4. Environment Variables (Critical)
 Ensure the following variables are set in your production environment:
 
 | Variable | Description |
