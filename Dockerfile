@@ -1,20 +1,29 @@
-FROM python:3.11-slim
+# Use a single base for both services to optimize build time
+FROM python:3.11-slim as base
 
 WORKDIR /app
 
-# Install dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
 COPY . .
 
-# Expose port
+ENV PYTHONUNBUFFERED=1
+
+# --- Backend Stage ---
+FROM base as backend
 EXPOSE 8000
-
-# Set environment variables
-ENV FINANCIAL_AGENT_HOST=0.0.0.0
-ENV FINANCIAL_AGENT_PORT=8000
-
-# Run the application
 CMD ["uvicorn", "financial_agent.api.routes:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# --- Frontend Stage ---
+FROM base as frontend
+EXPOSE 8501
+CMD ["streamlit", "run", "frontend/app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
+
+# --- Final Target (determined by build-arg) ---
+# Default to backend if no arg is provided
+FROM ${TARGET_SERVICE:-backend}

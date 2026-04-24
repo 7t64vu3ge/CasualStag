@@ -4,6 +4,7 @@ services:
     env: docker
     dockerContext: .
     dockerfilePath: Dockerfile
+    dockerTarget: backend
     plan: free
     envVars:
       - fromGroup: financial-agent-secrets
@@ -16,7 +17,8 @@ services:
     name: financial-agent-frontend
     env: docker
     dockerContext: .
-    dockerfilePath: Dockerfile.frontend
+    dockerfilePath: Dockerfile
+    dockerTarget: frontend
     plan: free
     envVars:
       - fromGroup: financial-agent-secrets
