@@ -1,3 +1,5 @@
+ARG TARGET_SERVICE=backend
+
 # Use a single base for both services to optimize build time
 FROM python:3.11-slim as base
 

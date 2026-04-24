@@ -25,11 +25,11 @@ I have configured a unified **Multi-Stage Dockerfile** for standard cloud deploy
 1. **Backend Service**:
    - **Environment**: Docker
    - **Dockerfile Path**: `Dockerfile`
-   - **Docker Target**: `backend`
+   - **Docker Build Args**: `TARGET_SERVICE=backend`
 2. **Frontend Service**:
    - **Environment**: Docker
    - **Dockerfile Path**: `Dockerfile`
-   - **Docker Target**: `frontend`
+   - **Docker Build Args**: `TARGET_SERVICE=frontend`
    - **Env Var**: `FINANCIAL_AGENT_API_URL` (Point to your Backend URL)
 
 ---
