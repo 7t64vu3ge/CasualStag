@@ -9,7 +9,7 @@ from financial_agent.market_intelligence import MarketIntelligenceService
 from financial_agent.observability import ObservabilityService
 from financial_agent.portfolio_analytics import PortfolioAnalyticsService
 from financial_agent.reasoning_engine import EvaluationService, ReasoningEngine
-from financial_agent.schemas import AnalyzeResponse, ConfidenceFactors, Conflict, Counterfactual, Driver, ImpactAttribution, PortfolioDescriptor
+from financial_agent.schemas import AnalyzeResponse, ChatRequest, ChatResponse, ConfidenceFactors, Conflict, Counterfactual, Driver, ImpactAttribution, PortfolioDescriptor
 
 
 class FinancialAdvisorService:
@@ -115,3 +115,26 @@ class FinancialAdvisorService:
         )
         self.observability_service.finish_trace(trace, response.model_dump())
         return response
+
+    def chat(self, portfolio_id: str, message: str, history: list[dict[str, str]]) -> ChatResponse:
+        # Get context by running analysis
+        analysis = self.analyze(portfolio_id)
+        
+        system_prompt = (
+            "You are a professional Financial Advisor Chatbot. "
+            "You have access to the user's current portfolio analysis. "
+            "Answer questions based ONLY on the provided context. If you don't know, say you don't know. "
+            "Be polite, professional, and concise. Do not give direct buy/sell advice, but explain the data.\n\n"
+            f"--- PORTFOLIO CONTEXT ---\n"
+            f"Summary: {analysis.summary}\n"
+            f"Key Drivers: {', '.join([d.factor for d in analysis.drivers])}\n"
+            f"Detected Risks: {', '.join(analysis.risks)}\n"
+            f"Confidence in Data: {analysis.confidence * 100}%\n"
+            "--------------------------"
+        )
+        
+        answer = self.explanation_service.chat(system_prompt, message, history)
+        return ChatResponse(
+            answer=answer, 
+            context_used=["Portfolio Analysis", "Market Drivers", "Risk Matrix"]
+        )

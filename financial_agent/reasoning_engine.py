@@ -113,15 +113,18 @@ class ReasoningEngine:
     def filter_signals_node(self, state: ReasoningState) -> ReasoningState:
         portfolio_allocation = state["portfolio_analytics"]["allocation"]
         stock_exposure = state["portfolio_analytics"]["stock_exposure"]
+        
+        relevant_sectors = set(portfolio_allocation.keys())
+        relevant_stocks = set(stock_exposure.keys())
+        
         relevant_signals: list[dict[str, Any]] = []
         for signal in state["market_intelligence"]["processed_news"]:
-            if signal["target_type"] == "market":
+            target_type = signal["target_type"]
+            if target_type == "market":
                 relevant_signals.append(signal)
-                continue
-            if signal["target_type"] == "sector" and any(sector in portfolio_allocation for sector in signal["sectors"]):
+            elif target_type == "sector" and any(s in relevant_sectors for s in signal["sectors"]):
                 relevant_signals.append(signal)
-                continue
-            if signal["target_type"] == "stock" and any(stock in stock_exposure for stock in signal["stocks"]):
+            elif target_type == "stock" and any(s in relevant_stocks for s in signal["stocks"]):
                 relevant_signals.append(signal)
 
         state["relevant_signals"] = relevant_signals
@@ -129,7 +132,7 @@ class ReasoningEngine:
             state["trace"],
             "filtered_news",
             input_data={"total_news": len(state["market_intelligence"]["processed_news"])},
-            output_data={"relevant_signals": relevant_signals},
+            output_data={"relevant_signals_count": len(relevant_signals)},
         )
         return state
 
@@ -193,9 +196,9 @@ class ReasoningEngine:
         for signal in top_signals:
             causal_graph.append({
                 "event": self._cause_label(signal),
-                "sector": signal.get("dominant_sector_label"),
-                "stock": signal.get("dominant_stock_label"),
-                "portfolio_impact": round(signal["impact"], 2)
+                "entity": signal.get("dominant_stock_label") or signal.get("dominant_sector_label") or "Market",
+                "portfolio_impact": round(signal["impact"], 2),
+                "confidence_score": round(abs(float(signal["sentiment_score"])), 2)
             })
         state["causal_graph"] = causal_graph
 
@@ -250,12 +253,13 @@ class ReasoningEngine:
         state["insight"] = insight
         state["counterfactuals"] = counterfactuals
         state["non_drivers"] = non_drivers
-        self.observability_service.record_phase(
+        self.observability_service.record_generation(
             state["trace"],
             "final_summary",
             input_data={"prompt": explanation["prompt"]},
             output_data={"summary": explanation["summary"], "generator": explanation["generator"]},
-            metadata={"model": explanation["model"]},
+            model=explanation["model"],
+            usage=explanation.get("usage"),
         )
         return state
 
@@ -407,7 +411,10 @@ class ReasoningEngine:
         completeness = 1.0 if linked_signals else 0.6
         total_top_impact = sum(abs(signal["impact"]) for signal in top_signals)
         pnl_magnitude = abs(pnl["percentage_change"])
-        coverage = 1.0 if pnl_magnitude < 0.1 else min(total_top_impact / max(pnl_magnitude, 0.01), 1.0)
+        
+        # Optimization: More sensitive coverage calculation
+        coverage = 1.0 if pnl_magnitude < 0.1 else clamp(total_top_impact / max(pnl_magnitude, 0.01), 0.0, 1.0)
+        
         alignment = 0.8
         if total_top_impact > 0:
             pnl_direction = 1 if pnl["percentage_change"] > 0 else -1 if pnl["percentage_change"] < 0 else 0
@@ -417,14 +424,19 @@ class ReasoningEngine:
                 if pnl_direction == 0 or (signal["impact"] > 0 and pnl_direction > 0) or (signal["impact"] < 0 and pnl_direction < 0)
             )
             alignment = aligned / total_top_impact if total_top_impact else 0.7
+            
+        # Optimization: Factor in the priority of news
         news_strength = 0.5
         if top_signals:
             average_priority = sum(signal["priority_rank"] for signal in top_signals) / (3 * len(top_signals))
             average_sentiment = sum(min(abs(float(signal["sentiment_score"])), 1.0) for signal in top_signals) / len(top_signals)
             news_strength = clamp((0.6 * average_priority) + (0.4 * average_sentiment), 0.0, 1.0)
-        conflict_penalty = min(len(conflicts) * 0.08, 0.24)
+            
+        # Optimization: Harsher conflict penalty for reasoning integrity
+        conflict_penalty = min(len(conflicts) * 0.12, 0.36)
+        
         confidence = clamp(
-            (0.25 * completeness) + (0.3 * coverage) + (0.2 * alignment) + (0.25 * news_strength) - conflict_penalty,
+            (0.20 * completeness) + (0.35 * coverage) + (0.25 * alignment) + (0.20 * news_strength) - conflict_penalty,
             0.0,
             1.0,
         )

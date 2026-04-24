@@ -56,6 +56,7 @@ class ObservabilityService:
         input_data: Any | None = None,
         output_data: Any | None = None,
         metadata: dict[str, Any] | None = None,
+        usage: dict[str, Any] | None = None,
     ) -> None:
         elapsed_ms = round((time.perf_counter() - trace.started_at) * 1000, 2)
         event = {
@@ -64,25 +65,65 @@ class ObservabilityService:
             "input": input_data,
             "output": output_data,
             "metadata": metadata or {},
+            "usage": usage,
         }
         trace.events.append(event)
         LOGGER.info("trace_phase=%s elapsed_ms=%s", name, elapsed_ms)
         if self._client and trace.trace_id:
-            self._client.create_event(
-                trace_context={"trace_id": trace.trace_id},
-                name=name,
-                input=input_data,
-                output=output_data,
-                metadata={"elapsed_ms": elapsed_ms, **(metadata or {})},
+            try:
+                self._client.create_event(
+                    trace_context={"trace_id": trace.trace_id},
+                    name=name,
+                    input=input_data,
+                    output=output_data,
+                    metadata={"elapsed_ms": elapsed_ms, **(metadata or {})},
+                    usage=usage,
+                )
+            except Exception as e:
+                LOGGER.warning("Failed to record phase '%s' to Langfuse: %s", name, e)
+
+    def record_generation(
+        self,
+        trace: TraceRun,
+        name: str,
+        *,
+        input_data: Any | None = None,
+        output_data: Any | None = None,
+        model: str | None = None,
+        usage: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        elapsed_ms = round((time.perf_counter() - trace.started_at) * 1000, 2)
+        if self._client and trace.trace_id:
+            try:
+                self._client.generation(
+                    trace_id=trace.trace_id,
+                    name=name,
+                    input=input_data,
+                    output=output_data,
+                    model=model,
+                    usage=usage,
+                    metadata={"elapsed_ms": elapsed_ms, **(metadata or {})},
+                )
+            except Exception as e:
+                LOGGER.warning("Failed to record generation '%s' to Langfuse: %s", name, e)
+                self.record_phase(
+                    trace, name, input_data=input_data, output_data=output_data, usage=usage, metadata=metadata
+                )
+        else:
+            self.record_phase(
+                trace, name, input_data=input_data, output_data=output_data, usage=usage, metadata=metadata
             )
 
     def finish_trace(self, trace: TraceRun, response: dict[str, Any]) -> None:
         total_elapsed_ms = round((time.perf_counter() - trace.started_at) * 1000, 2)
         if self._client and trace.trace_id:
-            self._client.create_event(
-                trace_context={"trace_id": trace.trace_id},
-                name="analyze.finish",
-                output=response,
-                metadata={"latency_ms": total_elapsed_ms, "event_count": len(trace.events)},
-            )
-            self._client.flush()
+            try:
+                self._client.create_event(
+                    trace_context={"trace_id": trace.trace_id},
+                    name="analyze.finish",
+                    output=response,
+                    metadata={"latency_ms": total_elapsed_ms, "event_count": len(trace.events)},
+                )
+            except Exception as e:
+                LOGGER.warning("Failed to finish trace in Langfuse: %s", e)

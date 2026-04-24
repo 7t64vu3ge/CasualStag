@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException
 
 from financial_agent.config import get_settings
 from financial_agent.service import FinancialAdvisorService
-from financial_agent.schemas import AnalyzeRequest, AnalyzeResponse, PortfolioDescriptor
+from financial_agent.schemas import AnalyzeRequest, AnalyzeResponse, ChatRequest, ChatResponse, PortfolioDescriptor
 
 
 from fastapi.responses import HTMLResponse
@@ -104,6 +104,53 @@ def developer_console() -> str:
         th, td { text-align: left; padding: 0.75rem; border-bottom: 1px solid var(--border); }
         th { color: var(--accent); }
         .loading { opacity: 0.5; pointer-events: none; }
+        
+        /* Chat UI Styles */
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            height: 400px;
+        }
+        .chat-messages {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 1rem;
+            background: #000;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .message {
+            max-width: 80%;
+            padding: 0.5rem 0.75rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+        }
+        .message.user {
+            align-self: flex-end;
+            background: var(--accent);
+            color: var(--bg);
+        }
+        .message.assistant {
+            align-self: flex-start;
+            background: var(--border);
+            color: var(--text);
+            white-space: pre-wrap;
+        }
+        .chat-input-group {
+            display: flex;
+            gap: 0.5rem;
+        }
+        .chat-input-group input {
+            flex-grow: 1;
+            padding: 0.5rem;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+            background: var(--bg);
+            color: var(--text);
+        }
     </style>
 </head>
 <body>
@@ -135,6 +182,19 @@ def developer_console() -> str:
                 <h2>Raw JSON Response</h2>
                 <pre id="rawJson">{}</pre>
             </div>
+
+            <div class="card">
+                <h2>💬 Chat with Agent</h2>
+                <div class="chat-container">
+                    <div id="chatMessages" class="chat-messages">
+                        <div class="message assistant">Ask me anything about your portfolio once analyzed!</div>
+                    </div>
+                    <div class="chat-input-group">
+                        <input type="text" id="chatInput" placeholder="How is HDFC Bank affecting me?">
+                        <button id="sendBtn">Send</button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -151,7 +211,7 @@ def developer_console() -> str:
                 const res = await fetch('/portfolios');
                 const data = await res.json();
                 portfolioSelect.innerHTML = data.map(p => 
-                    `<option value="${p.portfolio_id}">${p.name} (${p.portfolio_id})</option>`
+                    `<option value="${p.portfolio_id}">${p.user_name} (${p.portfolio_id})</option>`
                 ).join('');
             } catch (err) {
                 portfolioSelect.innerHTML = '<option value="">Error loading</option>';
@@ -177,10 +237,9 @@ def developer_console() -> str:
                 summaryDiv.innerText = data.summary;
                 
                 if (data.causal_graph && data.causal_graph.length > 0) {
-                    let html = '<table><thead><tr><th>Event</th><th>Entity</th><th>Impact</th></tr></thead><tbody>';
+                    let html = '<table><thead><tr><th>Event</th><th>Entity</th><th>Impact</th><th>Conf</th></tr></thead><tbody>';
                     data.causal_graph.forEach(node => {
-                        const entity = node.stock || node.sector || 'Market';
-                        html += `<tr><td>${node.event}</td><td>${entity}</td><td>${node.portfolio_impact.toFixed(2)}%</td></tr>`;
+                        html += `<tr><td>${node.event}</td><td>${node.entity}</td><td>${node.portfolio_impact.toFixed(2)}%</td><td>${(node.confidence_score * 100).toFixed(0)}%</td></tr>`;
                     });
                     html += '</tbody></table>';
                     graphContainer.innerHTML = html;
@@ -197,6 +256,52 @@ def developer_console() -> str:
 
         analyzeBtn.onclick = analyze;
         fetchPortfolios();
+
+        // Chat Logic
+        const chatMessages = document.getElementById('chatMessages');
+        const chatInput = document.getElementById('chatInput');
+        const sendBtn = document.getElementById('sendBtn');
+        let chatHistory = [];
+
+        async function sendChat() {
+            const message = chatInput.value.trim();
+            const portfolioId = portfolioSelect.value;
+            if (!message || !portfolioId) return;
+
+            // Add user message
+            appendMessage('user', message);
+            chatInput.value = '';
+
+            try {
+                const res = await fetch('/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        portfolio_id: portfolioId,
+                        message: message,
+                        history: chatHistory
+                    })
+                });
+                const data = await res.json();
+                
+                appendMessage('assistant', data.answer);
+                chatHistory.push({ role: 'user', content: message });
+                chatHistory.push({ role: 'assistant', content: data.answer });
+            } catch (err) {
+                appendMessage('assistant', 'Error: ' + err.message);
+            }
+        }
+
+        function appendMessage(role, text) {
+            const div = document.createElement('div');
+            div.className = `message ${role}`;
+            div.innerText = text;
+            chatMessages.appendChild(div);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        sendBtn.onclick = sendChat;
+        chatInput.onkeypress = (e) => { if (e.key === 'Enter') sendChat(); };
     </script>
 </body>
 </html>
@@ -217,6 +322,14 @@ def list_portfolios() -> list[PortfolioDescriptor]:
 def analyze_portfolio(payload: AnalyzeRequest) -> AnalyzeResponse:
     try:
         return get_service().analyze(payload.portfolio_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/chat", response_model=ChatResponse)
+def chat(payload: ChatRequest) -> ChatResponse:
+    try:
+        return get_service().chat(payload.portfolio_id, payload.message, payload.history)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

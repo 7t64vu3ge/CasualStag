@@ -69,6 +69,17 @@ class AnalyzeResponse(BaseModel):
     evaluation_breakdown: EvaluationBreakdown
 
 
+class ChatRequest(BaseModel):
+    portfolio_id: str
+    message: str
+    history: list[dict[str, str]] = Field(default_factory=list)
+
+
+class ChatResponse(BaseModel):
+    answer: str
+    context_used: list[str]
+
+
 class PortfolioDescriptor(BaseModel):
     portfolio_id: str
     aliases: list[str]

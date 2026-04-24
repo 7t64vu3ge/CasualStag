@@ -26,11 +26,11 @@ class ExplanationService:
 
     def generate_summary(self, context: dict[str, Any]) -> dict[str, Any]:
         prompt = self._build_prompt(context)
-        if self._client and self.openai_model:
+        if self._client:
             try:
-                response = self._client.responses.create(
-                    model=self.openai_model,
-                    input=[
+                response = self._client.chat.completions.create(
+                    model=self._model,
+                    messages=[
                         {
                             "role": "system",
                             "content": (
@@ -43,13 +43,21 @@ class ExplanationService:
                     ],
                     temperature=0.2,
                 )
-                summary = getattr(response, "output_text", "").strip()
+                summary = response.choices[0].message.content or ""
                 if summary:
+                    usage = None
+                    if hasattr(response, "usage") and response.usage:
+                        usage = {
+                            "prompt_tokens": getattr(response.usage, "prompt_tokens", 0),
+                            "completion_tokens": getattr(response.usage, "completion_tokens", 0),
+                            "total_tokens": getattr(response.usage, "total_tokens", 0),
+                        }
                     return {
-                        "summary": summary,
+                        "summary": summary.strip(),
                         "prompt": prompt,
                         "generator": "groq",
                         "model": self._model,
+                        "usage": usage,
                     }
             except Exception:
                 pass
@@ -60,6 +68,25 @@ class ExplanationService:
             "generator": "template",
             "model": None,
         }
+
+    def chat(self, system_prompt: str, user_message: str, history: list[dict[str, str]] | None = None) -> str:
+        if not self._client:
+            return "AI Chat is disabled (mode is 'template'). Please enable 'groq' mode in .env to use the chatbot."
+        
+        messages = [{"role": "system", "content": system_prompt}]
+        if history:
+            messages.extend(history)
+        messages.append({"role": "user", "content": user_message})
+
+        try:
+            response = self._client.chat.completions.create(
+                model=self._model,
+                messages=messages,
+                temperature=0.7,
+            )
+            return response.choices[0].message.content or ""
+        except Exception as e:
+            return f"Chat Error: {str(e)}"
 
     def _build_prompt(self, context: dict[str, Any]) -> str:
         drivers = context["drivers"]
@@ -93,25 +120,30 @@ class ExplanationService:
         pnl = context["pnl"]
         return "\n".join(
             [
+                "### CONTEXT ###",
                 f"Portfolio: {context['portfolio_name']} ({context['portfolio_type']})",
-                f"Day change: {pnl['percentage_change']:.2f}% ({pnl['total_change']:.2f} INR)",
-                f"Market sentiment: {context['market_sentiment']}",
-                f"Dominance insight: {insight or 'None'}",
-                f"Counterfactual: {counterfactual['insight'] if counterfactual else 'None'}",
-                "Top drivers:",
+                f"Day Change: {pnl['percentage_change']:.2f}% ({pnl['total_change']:.2f} INR)",
+                f"Market Sentiment: {context['market_sentiment']}",
+                f"Dominance Insight: {insight or 'No single factor dominated.'}",
+                f"Counterfactual Analysis: {counterfactual['insight'] if counterfactual else 'N/A'}",
+                "",
+                "### TOP DRIVERS ###",
                 *driver_lines,
-                "Non-drivers:",
+                "",
+                "### NON-DRIVERS & CONTEXTUAL NOISE ###",
                 *non_driver_lines,
-                "Risks:",
-                *risk_lines,
-                "Conflicts:",
+                "",
+                "### RISKS & CONFLICTS ###",
+                f"Identified Risks: {', '.join(risks) if risks else 'None'}",
                 *conflict_lines,
+                "",
+                "### OUTPUT INSTRUCTIONS ###",
                 "Return exactly four lines and no bullets:",
-                "Overall movement: summarize the day move and market backdrop.",
-                "Primary driver: explain the main driver, its impact, and the dominance/counterfactual insight.",
-                "Secondary driver: mention the second driver or explain why other sectors were not material.",
-                "Key risk: state the main portfolio risk and any key ambiguity.",
-                "Constraints: max 4 lines, no repetition, use only supplied facts and numbers.",
+                "Overall movement: summarize the day move and market backdrop with numbers.",
+                "Primary driver: detail the top driver, its impact, and why it dominated (use the dominance insight).",
+                "Secondary driver: mention the second driver or explain why other sectors were muted using non-driver facts.",
+                "Key risk: state the main portfolio risk and address any conflicts/ambiguities mentioned above.",
+                "Constraints: max 4 lines, no repetition, use only supplied facts, be professional and causal.",
             ]
         )
 
