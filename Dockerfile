@@ -17,4 +17,4 @@ ENV FINANCIAL_AGENT_HOST=0.0.0.0
 ENV FINANCIAL_AGENT_PORT=8000
 
 # Run the application
-CMD ["python", "-m", "financial_agent"]
+CMD ["uvicorn", "financial_agent.api.routes:app", "--host", "0.0.0.0", "--port", "8000"]

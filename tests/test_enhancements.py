@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
-from financial_agent.main import app
+from financial_agent.api.routes import app
 
 client = TestClient(app)
 
@@ -26,8 +26,8 @@ def test_analyze_no_news_scenario() -> None:
         for node in payload["causal_graph"]:
             assert "event" in node
             assert "portfolio_impact" in node
-            # Ensure at least one of sector or stock is present if it's a valid link
-            assert node["sector"] is not None or node["stock"] is not None
+            assert "entity" in node
+            assert "confidence_score" in node
 
 def test_causal_graph_structure() -> None:
     response = client.post("/analyze", json={"portfolio_id": "sector_heavy"})
@@ -38,5 +38,4 @@ def test_causal_graph_structure() -> None:
     first_node = payload["causal_graph"][0]
     assert isinstance(first_node["event"], str)
     assert isinstance(first_node["portfolio_impact"], float)
-    # Sector heavy portfolio should have sector and potentially stock info
-    assert first_node["sector"] is not None
+    assert first_node["entity"] is not None

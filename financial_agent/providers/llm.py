@@ -8,8 +8,8 @@ try:
 except ImportError:  # pragma: no cover - optional dependency
     OpenAI = None  # type: ignore[assignment]
 
-from financial_agent.config import Settings
-from financial_agent.utils import prettify_token, short_headline
+from financial_agent.utils.config import Settings
+from financial_agent.utils.helpers import prettify_token, short_headline
 
 
 class ExplanationService:

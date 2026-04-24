@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from financial_agent.config import Settings
-from financial_agent.data_loader import DataLoader
-from financial_agent.explanation import ExplanationService
-from financial_agent.market_intelligence import MarketIntelligenceService
-from financial_agent.observability import ObservabilityService
-from financial_agent.portfolio_analytics import PortfolioAnalyticsService
-from financial_agent.reasoning_engine import EvaluationService, ReasoningEngine
-from financial_agent.schemas import AnalyzeResponse, ChatRequest, ChatResponse, ConfidenceFactors, Conflict, Counterfactual, Driver, ImpactAttribution, PortfolioDescriptor
+from financial_agent.utils.config import Settings
+from financial_agent.utils.data import DataLoader
+from financial_agent.providers.llm import ExplanationService
+from financial_agent.providers.market import MarketIntelligenceService
+from financial_agent.utils.observability import ObservabilityService
+from financial_agent.providers.portfolio import PortfolioAnalyticsService
+from financial_agent.core.engine import EvaluationService, ReasoningEngine
+from financial_agent.api.schemas import AnalyzeResponse, ChatRequest, ChatResponse, ConfidenceFactors, Conflict, Counterfactual, Driver, ImpactAttribution, PortfolioDescriptor
 
 
 class FinancialAdvisorService:

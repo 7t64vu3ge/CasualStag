@@ -1,11 +1,29 @@
 version: '3.8'
 
 services:
-  financial-agent:
+  backend:
     build: .
     ports:
       - "8000:8000"
     env_file:
       - .env
+    environment:
+      - FINANCIAL_AGENT_HOST=0.0.0.0
+      - FINANCIAL_AGENT_PORT=8000
+
+  frontend:
+    image: python:3.11-slim
+    working_dir: /app
     volumes:
-      - ./AgentAssignment:/app/AgentAssignment
+      - .:/app
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    environment:
+      - FINANCIAL_AGENT_API_URL=http://backend:8000
+    command: >
+      sh -c "pip install streamlit requests pandas plotly streamlit-chat &&
+             streamlit run frontend/app.py --server.address 0.0.0.0"
+    depends_on:
+      - backend

@@ -4,9 +4,14 @@ from functools import lru_cache
 
 from fastapi import FastAPI, HTTPException
 
-from financial_agent.config import get_settings
-from financial_agent.service import FinancialAdvisorService
-from financial_agent.schemas import AnalyzeRequest, AnalyzeResponse, ChatRequest, ChatResponse, PortfolioDescriptor
+from financial_agent.utils.config import get_settings
+from financial_agent.core.service import FinancialAdvisorService
+from financial_agent.api.schemas import AnalyzeRequest, AnalyzeResponse, ChatRequest, ChatResponse, PortfolioDescriptor
+from financial_agent.utils.data import DataLoader
+from financial_agent.providers.market import MarketIntelligenceService
+from financial_agent.utils.observability import ObservabilityService
+from financial_agent.providers.portfolio import PortfolioAnalyticsService
+from financial_agent.core.engine import EvaluationService, ReasoningEngine
 
 
 from fastapi.responses import HTMLResponse

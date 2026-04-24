@@ -3,10 +3,10 @@ from __future__ import annotations
 import re
 from typing import Any, Callable, TypedDict
 
-from financial_agent.explanation import ExplanationService, label_for_target
-from financial_agent.observability import ObservabilityService, TraceRun
-from financial_agent.portfolio_analytics import NON_EQUITY_BUCKETS
-from financial_agent.utils import clamp, normalize_identifier, prettify_token, short_headline
+from financial_agent.providers.llm import ExplanationService, label_for_target
+from financial_agent.utils.observability import ObservabilityService, TraceRun
+from financial_agent.providers.portfolio import NON_EQUITY_BUCKETS
+from financial_agent.utils.helpers import clamp, normalize_identifier, prettify_token, short_headline
 
 try:
     from langgraph.graph import END, StateGraph

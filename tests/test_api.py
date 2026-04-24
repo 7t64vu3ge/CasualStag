@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from financial_agent.main import app
+from financial_agent.api.routes import app
 
 
 client = TestClient(app)

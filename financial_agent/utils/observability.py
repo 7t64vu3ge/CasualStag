@@ -10,7 +10,7 @@ try:
 except ImportError:  # pragma: no cover - optional dependency
     Langfuse = None  # type: ignore[assignment]
 
-from financial_agent.config import Settings
+from financial_agent.utils.config import Settings
 
 
 LOGGER = logging.getLogger(__name__)
@@ -38,15 +38,23 @@ class ObservabilityService:
         trace_id: str | None = None
         trace_url: str | None = None
         if self._client:
-            trace_id = self._client.create_trace_id()
-            trace_url = self._client.get_trace_url(trace_id=trace_id)
-            self._client.create_event(
-                trace_context={"trace_id": trace_id},
-                name=f"{name}.start",
-                input=request_input,
-                metadata={"component": "financial-agent"},
-            )
-        return TraceRun(trace_id=trace_id, trace_url=trace_url, started_at=time.perf_counter())
+            try:
+                trace_id = self._client.create_trace_id()
+                trace_url = self._client.get_trace_url(trace_id=trace_id)
+                self._client.create_event(
+                    trace_context={"trace_id": trace_id},
+                    name=f"{name}.start",
+                    input=request_input,
+                    metadata={"component": "financial-agent"},
+                )
+            except Exception as e:
+                LOGGER.warning("Failed to start Langfuse trace: %s", e)
+        
+        return TraceRun(
+            trace_id=trace_id,
+            trace_url=trace_url,
+            started_at=time.perf_counter(),
+        )
 
     def record_phase(
         self,
@@ -76,8 +84,7 @@ class ObservabilityService:
                     name=name,
                     input=input_data,
                     output=output_data,
-                    metadata={"elapsed_ms": elapsed_ms, **(metadata or {})},
-                    usage=usage,
+                    metadata={"elapsed_ms": elapsed_ms, **(metadata or {}), "usage": usage},
                 )
             except Exception as e:
                 LOGGER.warning("Failed to record phase '%s' to Langfuse: %s", name, e)
@@ -96,13 +103,14 @@ class ObservabilityService:
         elapsed_ms = round((time.perf_counter() - trace.started_at) * 1000, 2)
         if self._client and trace.trace_id:
             try:
-                self._client.generation(
-                    trace_id=trace.trace_id,
+                self._client.start_observation(
+                    trace_context={"trace_id": trace.trace_id},
                     name=name,
+                    as_type="generation",
                     input=input_data,
                     output=output_data,
                     model=model,
-                    usage=usage,
+                    usage_details=usage,
                     metadata={"elapsed_ms": elapsed_ms, **(metadata or {})},
                 )
             except Exception as e:

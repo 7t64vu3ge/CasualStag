@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
-from financial_agent.utils import normalize_identifier, prettify_token
+from financial_agent.utils.helpers import normalize_identifier, prettify_token
 
 
 NON_EQUITY_BUCKETS = {"ARBITRAGE", "CASH", "DEBT", "DIVERSIFIED_EQUITY", "OTHERS", "UNCLASSIFIED_MF"}

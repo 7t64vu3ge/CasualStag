@@ -12,7 +12,7 @@ except ImportError:  # pragma: no cover - optional dependency
         return False
 
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(ROOT_DIR / ".env")
 
 
@@ -38,7 +38,7 @@ def get_settings() -> Settings:
         explanation_mode=os.getenv("FINANCIAL_AGENT_EXPLANATION_MODE", "template"),
         langfuse_public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
         langfuse_secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
-        langfuse_host=os.getenv("LANGFUSE_HOST"),
+        langfuse_host=os.getenv("LANGFUSE_HOST") or os.getenv("LANGFUSE_BASE_URL"),
         groq_api_key=os.getenv("GROQ_API_KEY"),
         groq_model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
     )
