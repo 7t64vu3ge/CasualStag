@@ -19,12 +19,12 @@ ENV PYTHONUNBUFFERED=1
 # --- Backend Stage ---
 FROM base as backend
 EXPOSE 8000
-CMD ["uvicorn", "financial_agent.api.routes:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "uvicorn financial_agent.api.routes:app --host 0.0.0.0 --port ${PORT:-8000}"]
 
 # --- Frontend Stage ---
 FROM base as frontend
 EXPOSE 8501
-CMD ["streamlit", "run", "frontend/app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
+CMD ["sh", "-c", "streamlit run frontend/app.py --server.port ${PORT:-8501} --server.address 0.0.0.0"]
 
 # --- Final Target (determined by build-arg) ---
 # Default to backend if no arg is provided
