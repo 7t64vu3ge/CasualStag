@@ -10,7 +10,7 @@ import os
 BACKEND_URL = os.getenv("FINANCIAL_AGENT_API_URL", "https://financial-agent-api-zw0e.onrender.com")
 
 st.set_page_config(
-    page_title="Financial Agent Dashboard",
+    page_title="Casual Stag Financial Agent Dashboard",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded",
