@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: financial-agent-backend
+    env: docker
+    dockerContext: .
+    dockerfilePath: Dockerfile
+    plan: free
+    envVars:
+      - fromGroup: financial-agent-secrets
+      - key: FINANCIAL_AGENT_HOST
+        value: 0.0.0.0
+      - key: FINANCIAL_AGENT_PORT
+        value: 8000
+
+  - type: web
+    name: financial-agent-frontend
+    env: docker
+    dockerContext: .
+    dockerfilePath: Dockerfile.frontend
+    plan: free
+    envVars:
+      - fromGroup: financial-agent-secrets
+      - key: FINANCIAL_AGENT_API_URL
+        fromService:
+          name: financial-agent-backend
+          type: web
+          property: host
