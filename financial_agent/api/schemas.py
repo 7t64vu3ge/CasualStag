@@ -31,6 +31,7 @@ class ImpactAttribution(BaseModel):
 class Driver(BaseModel):
     factor: str
     impact: float = Field(..., description="Estimated portfolio impact in percentage points")
+    causal_chain: str = Field(default="", description="Narrative causal chain from event to impact")
     impact_details: ImpactAttribution | None = None
 
 

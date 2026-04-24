@@ -1,6 +1,6 @@
 # Deployment Guide: Financial Advisor Agent
 
-This project is designed to be highly portable and can be deployed easily using Docker.
+This project is designed to be highly portable and can be deployed using Docker or a native Python environment.
 
 ## 1. Local Deployment (Recommended)
 The easiest way to run the project is using **Docker Compose**. This will automatically build and link the FastAPI backend and the Streamlit frontend.
@@ -9,9 +9,6 @@ The easiest way to run the project is using **Docker Compose**. This will automa
 # Clone the repository
 git clone <your-repo-url>
 cd financial-agent
-
-# Ensure your .env file is configured
-cp .env.example .env  # If not already present
 
 # Build and start the containers
 docker-compose up --build
@@ -22,60 +19,52 @@ docker-compose up --build
 
 ---
 
-## 2. Cloud Deployment (Render / Railway / AWS)
-Since the project is containerized, you can deploy it to any cloud provider that supports Docker.
+## 2. Docker Deployment (Render / Railway)
+I have configured a unified **Multi-Stage Dockerfile** for standard cloud deployments.
 
-### Render (Recommended Path)
-I have configured a unified **Multi-Stage Dockerfile** to work seamlessly with Render.
-
-1. **Connect your GitHub Repository** to Render.
-2. **Create a New Web Service** for the **Backend**:
+1. **Backend Service**:
    - **Environment**: Docker
    - **Dockerfile Path**: `Dockerfile`
    - **Docker Target**: `backend`
-   - **Environment Variables**: Add all keys from your `.env`.
-3. **Create a New Web Service** for the **Frontend**:
+2. **Frontend Service**:
    - **Environment**: Docker
    - **Dockerfile Path**: `Dockerfile`
    - **Docker Target**: `frontend`
-   - **Environment Variables**: Add `FINANCIAL_AGENT_API_URL` pointing to your Backend URL.
+   - **Env Var**: `FINANCIAL_AGENT_API_URL` (Point to your Backend URL)
 
 ---
 
 ## 3. Native Python Deployment (Without Docker)
-If you prefer not to use Docker, you can deploy using a standard Python environment.
+Use these steps if you are deploying to a platform like Render with a Python runtime.
 
 ### Backend Setup
-1. **Create a Web Service** on Render.
-2. **Environment**: `Python 3`
-3. **Build Command**: `pip install -r requirements.txt`
-4. **Start Command**: `sh scripts/start_backend.sh`
-5. **Environment Variables**: Add all keys from `.env`.
+1. **Runtime**: `Python 3`
+2. **Build Command**: `pip install -r requirements.txt`
+3. **Start Command**: `sh scripts/start_backend.sh`
 
 ### Frontend Setup
-1. **Create another Web Service** on Render.
-2. **Environment**: `Python 3`
-3. **Build Command**: `pip install -r requirements.txt`
-4. **Start Command**: `sh scripts/start_frontend.sh`
-5. **Environment Variables**: Add `FINANCIAL_AGENT_API_URL` pointing to your Backend.
+1. **Runtime**: `Python 3`
+2. **Build Command**: `pip install -r requirements.txt`
+3. **Start Command**: `sh scripts/start_frontend.sh`
+4. **Env Var**: `FINANCIAL_AGENT_API_URL` (Point to your Backend URL)
 
 ---
 
-## 4. Environment Variables (Critical)
+## 4. Environment Variables (Required)
 Ensure the following variables are set in your production environment:
 
 | Variable | Description |
 | :--- | :--- |
-| `GROQ_API_KEY` | Your Groq API key for the LLM reasoning. |
+| `GROQ_API_KEY` | Your Groq API key. |
 | `LANGFUSE_PUBLIC_KEY` | Public key for observability. |
 | `LANGFUSE_SECRET_KEY` | Secret key for observability. |
-| `FINANCIAL_AGENT_HOST` | Set to `0.0.0.0` for Docker/Cloud. |
+| `FINANCIAL_AGENT_HOST` | Set to `0.0.0.0`. |
 | `FINANCIAL_AGENT_EXPLANATION_MODE` | Set to `groq`. |
 
 ---
 
-## 4. CI/CD (Optional)
-You can use GitHub Actions to automate your deployment. Here is a basic workflow skeleton:
-1. **Lint & Test**: Run `flake8` and `pytest`.
-2. **Build Image**: Build the Docker image.
-3. **Deploy**: Push to your cloud provider (e.g., Render Deploy Hook).
+## 5. Development Mode (Local Venv)
+To run without Docker locally:
+1. `source .venv/bin/activate`
+2. Terminal 1: `sh scripts/start_backend.sh`
+3. Terminal 2: `sh scripts/start_frontend.sh`

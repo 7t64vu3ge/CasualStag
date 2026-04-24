@@ -96,6 +96,7 @@ class FinancialAdvisorService:
                 Driver(
                     factor=signal["factor"],
                     impact=round(signal["impact"], 2),
+                    causal_chain=signal.get("causal_chain", ""),
                     impact_details=ImpactAttribution(**signal["impact_details"]) if signal.get("impact_details") else None,
                 )
                 for signal in reasoning_state["top_signals"]

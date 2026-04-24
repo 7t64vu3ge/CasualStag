@@ -71,14 +71,14 @@ def send_chat(portfolio_id, user_msg, history):
         return {"answer": f"Error: {e}", "context_used": []}
 
 # Sidebar
-st.sidebar.title("🛠️ Control Panel")
+st.sidebar.title("Control Panel")
 portfolios = fetch_portfolios()
 if portfolios:
     portfolio_options = {f"{p['user_name']} ({p['portfolio_id']})": p['portfolio_id'] for p in portfolios}
     selected_label = st.sidebar.selectbox("Select Portfolio", list(portfolio_options.keys()))
     selected_id = portfolio_options[selected_label]
     
-    if st.sidebar.button("🚀 Run Analysis", use_container_width=True):
+    if st.sidebar.button("Run Analysis", use_container_width=True):
         with st.spinner("Analyzing market drivers..."):
             result = run_analysis(selected_id)
             st.session_state.last_result = result
@@ -87,7 +87,7 @@ else:
     st.sidebar.warning("No portfolios found. Is the backend running?")
 
 # Main Content
-st.title("📈 Financial Advisor Agent")
+st.title("Financial Advisor Agent")
 
 if "last_result" in st.session_state and st.session_state.last_result:
     res = st.session_state.last_result
@@ -101,60 +101,48 @@ if "last_result" in st.session_state and st.session_state.last_result:
     
     st.divider()
     
-    # Row 2: Narrative & Graph
+    # Row 2: Left Content & Right Content
     left_col, right_col = st.columns([1, 1])
     
     with left_col:
-        st.subheader("📝 Executive Summary")
+        # Section A: Executive Summary
+        st.subheader("Executive Summary")
         st.info(res['summary'])
         
-        with st.expander("🔍 Dominance Insight"):
+        with st.expander("Dominance Insight"):
             st.write(res.get('insight', "No dominance insight available."))
             
-        with st.expander("⚖️ Counterfactuals (What if?)"):
+        with st.expander("Counterfactuals (What if?)"):
             for cf in res.get('counterfactuals', []):
                 st.write(f"**Without {cf['without']}:** {cf['insight']}")
 
-    with right_col:
-        st.subheader("🕸️ Causal Reasoning Graph")
+        st.divider()
+
+        # Section B: Causal Reasoning Graph (Now below Executive Summary)
+        st.subheader("Causal Reasoning Graph")
         if res.get('causal_graph'):
             df_graph = pd.DataFrame(res['causal_graph'])
+            # The backend schema uses 'event' as the primary identifier for causal nodes
+            chart_y = 'event' if 'event' in df_graph.columns else df_graph.columns[0]
+            
             fig = px.bar(
                 df_graph, 
                 x='portfolio_impact', 
-                y='entity', 
+                y=chart_y, 
                 orientation='h',
-                title="Portfolio Impact by Entity",
+                title="Portfolio Impact by Source",
                 color='portfolio_impact',
                 color_continuous_scale='RdYlGn',
-                text='event'
+                text=chart_y
             )
             fig.update_layout(template="plotly_dark", plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.write("No causal links isolated.")
 
-    # Row 3: Drivers & Chat
-    st.divider()
-    d_col, c_col = st.columns([1, 1])
-    
-    with d_col:
-        st.subheader("🚦 Market Drivers")
-        for driver in res['drivers']:
-            with st.expander(f"🔹 {driver['factor']} ({driver['impact']:+.2f} pp)"):
-                st.write(f"**Causal Chain:** {driver['causal_chain']}")
-                if driver.get('impact_details'):
-                    st.json(driver['impact_details'])
-        
-        st.subheader("⚠️ Risks & Conflicts")
-        for risk in res['risks']:
-            st.warning(risk)
-        for conflict in res['conflicts']:
-            st.error(f"**Conflict:** {conflict['signal']}\n\n{conflict['explanation']}")
-
-    with c_col:
-        st.subheader("💬 AI Chat Advisor")
-        chat_container = st.container(height=400)
+    with right_col:
+        st.subheader("AI Chat Advisor")
+        chat_container = st.container(height=600)
         
         if "chat_history" not in st.session_state:
             st.session_state.chat_history = []
@@ -162,10 +150,10 @@ if "last_result" in st.session_state and st.session_state.last_result:
         # Display chat history
         with chat_container:
             for i, chat in enumerate(st.session_state.chat_history):
-                message(chat["content"], is_user=(chat["role"] == "user"), key=f"msg_{i}")
+                message(chat["content"], is_user=(chat["role"] == "user"), key=f"chat_msg_{i}_{selected_id}")
         
         # Chat input
-        if prompt := st.chat_input("Ask about HDFC Bank, market trends, or risks..."):
+        if prompt := st.chat_input("Ask about HDFC Bank, market trends, or risks...", key=f"chat_input_{selected_id}"):
             st.session_state.chat_history.append({"role": "user", "content": prompt})
             with st.spinner("Thinking..."):
                 # Prepare history for API
@@ -173,6 +161,25 @@ if "last_result" in st.session_state and st.session_state.last_result:
                 ans = send_chat(selected_id, prompt, api_history)
                 st.session_state.chat_history.append({"role": "assistant", "content": ans["answer"]})
             st.rerun()
+
+    # Row 3: Drivers
+    st.divider()
+    st.subheader("Market Drivers")
+    d1, d2 = st.columns(2)
+    
+    with d1:
+        for driver in res['drivers']:
+            with st.expander(f"Factor: {driver['factor']} ({driver['impact']:+.2f} pp)"):
+                st.write(f"**Causal Chain:** {driver.get('causal_chain', 'N/A')}")
+                if driver.get('impact_details'):
+                    st.json(driver['impact_details'])
+    
+    with d2:
+        st.subheader("Risks & Conflicts")
+        for risk in res['risks']:
+            st.warning(risk)
+        for conflict in res['conflicts']:
+            st.error(f"Conflict: {conflict['signal']}\n\n{conflict['explanation']}")
 
 else:
     st.info("👈 Select a portfolio and click 'Run Analysis' to begin.")
